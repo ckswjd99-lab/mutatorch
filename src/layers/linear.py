@@ -25,10 +25,5 @@ class MutableLinear(nn.Module):
         self.out_feature = new_out_feature
     
     def increase_features(self, more_in_feature, more_out_feature):
-        new_module = nn.Linear(self.in_feature + more_in_feature, self.out_feature + more_out_feature, device=self.device)
-        new_module.weight.data[:self.out_feature, :self.in_feature] = self.module.weight.data
-        new_module.bias.data[:self.out_feature] = self.module.bias.data
+        self.modify_features(self.in_feature + more_in_feature, self.out_feature + more_out_feature)
         
-        self.module = new_module
-        self.in_feature += more_in_feature
-        self.out_feature += more_out_feature

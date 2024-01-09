@@ -4,97 +4,85 @@ import torch.nn.functional as F
 import math
 
 from layers import MutableLinear, MutableConv2d
-from layers import SchedMutableLinear, SchedMutableConv2d
 
-class MutableVGG16(nn.Module):
-    def __init__(self, num_classes=10, device='cuda'):
-        super(MutableVGG16, self).__init__()
-        self.num_classes = num_classes
+class MyMutableVGG(nn.Module):
+    def __init__(self):
+        super(MyMutableVGG, self).__init__()
+        # input: Tensor[batch_size, 3, 32, 32]
+        self.conv = nn.ModuleDict({
+            'conv1_1': MutableConv2d(3, 16),
+            'conv1_2': MutableConv2d(16, 16),
+            'conv2_1': MutableConv2d(16, 32),
+            'conv2_2': MutableConv2d(32, 32),
+            'conv3_1': MutableConv2d(32, 64),
+            'conv3_2': MutableConv2d(64, 64),
+            'conv3_3': MutableConv2d(64, 64),
+        })
+        self.fc = nn.ModuleDict({
+            'fc1': MutableLinear(64 * 4 * 4, 1024),
+            'fc2': MutableLinear(1024, 1024),
+            'fc3': MutableLinear(1024, 100),
+        })
 
-        self.conv1_1 = SchedMutableConv2d([3] * 48, range(16, 64, 1), [3] * 48, [1] * 48, [1] * 48, device=device)
-        self.conv1_2 = SchedMutableConv2d(range(16, 64, 1), range(16, 64, 1), [3] * 48, [1]  * 48, [1] * 48, device=device)
-        self.conv2_1 = SchedMutableConv2d(range(16, 64, 1), range(32, 128, 2), [3] * 48, [1]  * 48, [1] * 48, device=device)
-        self.conv2_2 = SchedMutableConv2d(range(32, 128, 2), range(32, 128, 2), [3] * 48, [1]  * 48, [1] * 48, device=device)
-        self.conv3_1 = SchedMutableConv2d(range(32, 128, 2), range(64, 256, 4), [3] * 48, [1]  * 48, [1] * 48, device=device)
-        self.conv3_2 = SchedMutableConv2d(range(64, 256, 4), range(64, 256, 4), [3] * 48, [1]  * 48, [1] * 48, device=device)
-        self.conv3_3 = SchedMutableConv2d(range(64, 256, 4), range(64, 256, 4), [3] * 48, [1]  * 48, [1] * 48, device=device)
-        self.conv4_1 = SchedMutableConv2d(range(64, 256, 4), range(128, 512, 8), [3] * 48, [1]  * 48, [1] * 48, device=device)
-        self.conv4_2 = SchedMutableConv2d(range(128, 512, 8), range(128, 512, 8), [3] * 48, [1]  * 48, [1] * 48, device=device)
-        self.conv4_3 = SchedMutableConv2d(range(128, 512, 8), range(128, 512, 8), [3] * 48, [1]  * 48, [1] * 48, device=device)
-        self.conv5_1 = SchedMutableConv2d(range(128, 512, 8), range(128, 512, 8), [3] * 48, [1]  * 48, [1] * 48, device=device)
-        self.conv5_2 = SchedMutableConv2d(range(128, 512, 8), range(128, 512, 8), [3] * 48, [1]  * 48, [1] * 48, device=device)
-        self.conv5_3 = SchedMutableConv2d(range(128, 512, 8), range(128, 512, 8), [3] * 48, [1]  * 48, [1] * 48, device=device)
+        self.conv1_1 = self.conv['conv1_1']
+        self.conv1_2 = self.conv['conv1_2']
+        self.conv2_1 = self.conv['conv2_1']
+        self.conv2_2 = self.conv['conv2_2']
+        self.conv3_1 = self.conv['conv3_1']
+        self.conv3_2 = self.conv['conv3_2']
+        self.conv3_3 = self.conv['conv3_3']
+        self.fc1 = self.fc['fc1']
+        self.fc2 = self.fc['fc2']
+        self.fc3 = self.fc['fc3']
         
-        self.fc6 = SchedMutableLinear(range(128 * 1 * 1, 512 * 1 * 1, 8 * 1 * 1), range(1024, 4096, 48), device=device)
-        self.fc7 = SchedMutableLinear(range(1024, 4096, 48), range(1024, 4096, 48), device=device)
-        self.fc8 = SchedMutableLinear(range(1024, 4096, 48), [num_classes] * 48, device=device)
-        
-        self.maxpool = nn.MaxPool2d(2, 2)
-        self.relu = nn.ReLU(inplace=True)
-        self.dropout = nn.Dropout()
+        self.pool = nn.MaxPool2d(2, 2)
+
+        self.model_config = [3, 16, 16, 32, 32, 64, 64, 64, 1024, 1024, 100]
+        self.growth_size = [0, 8, 8, 16, 16, 32, 32, 32, 512, 512, 0]
 
         self.mutable_layers = [
             self.conv1_1, self.conv1_2,
             self.conv2_1, self.conv2_2,
             self.conv3_1, self.conv3_2, self.conv3_3,
-            self.conv4_1, self.conv4_2, self.conv4_3,
-            self.conv5_1, self.conv5_2, self.conv5_3,
-            self.fc6, self.fc7, self.fc8
+            self.fc1, self.fc2, self.fc3
         ]
-        
-        self.mutation_status = [0] * 16
-        self.mutation_max_steps = [48] * 16
-
-        self.conv = nn.Sequential(
-            self.conv1_1, self.relu,
-            self.conv1_2, self.relu,
-            self.maxpool,
-            self.conv2_1, self.relu,
-            self.conv2_2, self.relu,
-            self.maxpool,
-            self.conv3_1, self.relu,
-            self.conv3_2, self.relu,
-            self.conv3_3, self.relu,
-            self.maxpool,
-            self.conv4_1, self.relu,
-            self.conv4_2, self.relu,
-            self.conv4_3, self.relu,
-            self.maxpool,
-            self.conv5_1, self.relu,
-            self.conv5_2, self.relu,
-            self.conv5_3, self.relu,
-            self.maxpool,
-        ).to(device)
-
-        self.classifier = nn.Sequential(
-            self.dropout, self.fc6, self.relu,
-            self.dropout, self.fc7, self.relu,
-            self.dropout, self.fc8,
-        ).to(device)
-
-        self.nn_layers = nn.ModuleList(self.mutable_layers)
-
-    def forward(self, x):
-        x = self.conv(x)
-        # print(x.shape)
-        x = x.view(-1, x.shape[1] * x.shape[2] * x.shape[3])
-        x = self.classifier(x)
-        return x
-
-    def set_layer_step(self, layer_idx, step) :
-        if layer_idx < 0 or layer_idx >= len(self.mutable_layers) :
-            raise ValueError("Invalid layer index")
-        if step < 0 or step >= self.mutation_max_steps[layer_idx] :
-            raise ValueError("Invalid step")
-        
-        self.mutable_layers[layer_idx].set_step(step)
-        self.mutation_status[layer_idx] = step
     
-    def set_step(self, step) :
-        if step < 0 or step >= max(self.mutation_max_steps) :
-            raise ValueError("Invalid step")
-        
-        for layer_idx in range(len(self.mutable_layers)) :
-            self.set_layer_step(layer_idx, step)
-        
+    def forward(self, x):
+        # input: Tensor[batch_size, 3, 32, 32]
+        x = F.relu(self.conv1_1(x))
+        x = F.relu(self.conv1_2(x))
+        x = self.pool(x)
 
+        # input: Tensor[batch_size, (16-), 16, 16]
+        x = F.relu(self.conv2_1(x))
+        x = F.relu(self.conv2_2(x))
+        x = self.pool(x)
+
+        # input: Tensor[batch_size, (32-), 8, 8]
+        x = F.relu(self.conv3_1(x))
+        x = F.relu(self.conv3_2(x))
+        x = F.relu(self.conv3_3(x))
+        x = self.pool(x)
+
+        # input: Tensor[batch_size, (64-), 4, 4]
+        x = x.view(-1, self.model_config[7] * (4 * 4))
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+
+        return x
+    
+    def grow_all(self, weight_forget=0.0):
+        for i in range(len(self.mutable_layers)):
+            self.model_config[i] += self.growth_size[i]
+        
+        self.conv1_1.modify_channels(self.model_config[0], self.model_config[1], weight_forget)
+        self.conv1_2.modify_channels(self.model_config[1], self.model_config[2], weight_forget)
+        self.conv2_1.modify_channels(self.model_config[2], self.model_config[3], weight_forget)
+        self.conv2_2.modify_channels(self.model_config[3], self.model_config[4], weight_forget)
+        self.conv3_1.modify_channels(self.model_config[4], self.model_config[5], weight_forget)
+        self.conv3_2.modify_channels(self.model_config[5], self.model_config[6], weight_forget)
+        self.conv3_3.modify_channels(self.model_config[6], self.model_config[7], weight_forget)
+        self.fc1.modify_features(self.model_config[7] * (4 * 4), self.model_config[8])
+        self.fc2.modify_features(self.model_config[8], self.model_config[9])
+        self.fc3.modify_features(self.model_config[9], self.model_config[10])

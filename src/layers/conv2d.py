@@ -20,9 +20,7 @@ class MutableConv2d(nn.Module):
 
     def modify_in_channel(self, new_in_channel, weight_forget=0.0):
         new_module = nn.Conv2d(new_in_channel, self.out_channel, self.kernel_size, self.stride, self.padding, device=self.device)
-        new_module.weight.data = torch.zeros_like(new_module.weight.data)
         new_module.weight.data[:self.out_channel, :self.in_channel, :, :] = self.module.weight.data * (1 - weight_forget)
-        new_module.bias.data = torch.zeros_like(new_module.bias.data)
         new_module.bias.data[:self.out_channel] = self.module.bias.data
 
         self.module = new_module
@@ -30,9 +28,7 @@ class MutableConv2d(nn.Module):
 
     def modify_out_channel(self, new_out_channel, weight_forget=0.0):
         new_module = nn.Conv2d(self.in_channel, new_out_channel, self.kernel_size, self.stride, self.padding, device=self.device)
-        new_module.weight.data = torch.zeros_like(new_module.weight.data)
         new_module.weight.data[:self.out_channel, :self.in_channel, :, :] = self.module.weight.data * (1 - weight_forget)
-        new_module.bias.data = torch.zeros_like(new_module.bias.data)
         new_module.bias.data[:self.out_channel] = self.module.bias.data
 
         self.module = new_module
@@ -40,12 +36,12 @@ class MutableConv2d(nn.Module):
 
     def modify_channels(self, new_in_channel, new_out_channel, weight_forget=0.0):
         new_module = nn.Conv2d(new_in_channel, new_out_channel, self.kernel_size, self.stride, self.padding, device=self.device)
-        new_module.weight.data = torch.zeros_like(new_module.weight.data)
         new_module.weight.data[:self.out_channel, :self.in_channel, :, :] = self.module.weight.data * (1 - weight_forget)
-        new_module.bias.data = torch.zeros_like(new_module.bias.data)
         new_module.bias.data[:self.out_channel] = self.module.bias.data
 
         self.module = new_module
         self.out_channel = new_out_channel
         self.in_channel = new_in_channel
 
+    def increase_channels(self, more_in_channel, more_out_channel, weight_forget=0.0):
+        self.modify_channels(self.in_channel + more_in_channel, self.out_channel + more_out_channel, weight_forget)

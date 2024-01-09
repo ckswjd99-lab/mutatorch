@@ -1,1 +1,1 @@
-from vgg import MutableVGG16
+from .vgg import MutableVGG16
